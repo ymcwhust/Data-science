@@ -1,0 +1,204 @@
+---
+title: "NYC Shooting Trends: Unveiling Time and Place"
+output: html_document
+date: "2024-02-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+library(readr)
+library(ggplot2)
+library(maps)
+library(ggmap)
+library(dplyr)
+library(randomForest)
+Sys.setlocale(locale = "en")
+```
+
+## Introduction and Data Description
+
+Welcome to our exploration of New York City's shooting incidents. We delve into extensive NYPD data from NYC Open Data to uncover patterns and trends in these incidents across different times and locations. This study covers over 27,000 reported incidents from 2006 to last year, detailing each event's timing, location, and involved parties.The dataset used in this analysis was obtained from NYC Open Data and includes detailed records of shooting incidents reported by the NYPD, which can be accessed here. <https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic>.
+
+The dataset fields include essential details such as the date (`OCCUR_DATE`), time (`OCCUR_TIME`), and borough (`BORO`) of each incident, alongside descriptors of the location and individuals involved, including precinct (`PRECINCT`), jurisdiction code (`JURISDICTION_CODE`), and specifics about the perpetrator (`PERP_AGE_GROUP`, `PERP_SEX`, `PERP_RACE`) and victim (`VIC_AGE_GROUP`, `VIC_SEX`, `VIC_RACE`). Geographic coordinates (`X_COORD_CD`, `Y_COORD_CD`, `Latitude`, `Longitude`) are also provided, enabling spatial analysis of shooting events across New York City. This dataset allows for a detailed exploration of the patterns and trends in shooting incidents, vital for understanding urban crime dynamics and informing public safety strategies.
+
+## Data Import and Cleaning
+We've cleaned our dataset to ensure reliability, focusing on accurate date-time information and removing incomplete records. This stage sets the groundwork for a robust analysis, allowing us to focus on trends that matter.
+```{r data}
+data <- read.csv("./NYPD_Shooting_Incident_Data__Historic_.csv",header = TRUE, encoding = "UTF-8")
+glimpse(data)
+```
+We can see that the dataset is imported from a CSV file, providing a detailed snapshot of each shooting incident reported by the NYPD. This includes information such as the date and time of the incident, the borough in which it occurred, details about the perpetrator and victim, and the location's coordinates.
+```{r preprocess}
+# Remove columns and rows with too many invalid values
+threshold <- 0.5 
+na_percentage <- sapply(data, function(x) mean(is.na(x) | x == ""))
+filtered_columns <- names(na_percentage[na_percentage < threshold])
+shooting_data <- data %>% 
+  select(all_of(filtered_columns))
+
+# Data format transform
+shooting_data <- shooting_data %>%
+  mutate(OCCUR_DATE = mdy(OCCUR_DATE), 
+         OCCUR_TIME = hms(OCCUR_TIME),
+         HOUR = hour(OCCUR_TIME),
+         WEEKDAY = wday(OCCUR_DATE, label = TRUE)) %>%
+  filter(!is.na(BORO)) # Removing rows with missing Borough information
+
+glimpse(shooting_data)
+```
+In the data cleaning phase, we eliminate columns with over 50% missing values to ensure data quality. We then convert date and time fields into proper formats, and extract specific time components like hour and weekday. Records missing crucial borough information are also removed to maintain geographic accuracy. This results in a refined dataset, primed for analyzing NYC's shooting incidents and identifying key temporal and spatial patterns.
+
+
+## Data Analysis
+### Time Analysis
+We first examine how shooting incidents vary by time of day and by day of the week to identify any temporal patterns that could inform public safety strategies.
+
+```{r}
+# Distribution by Hour
+shooting_data %>%
+  count(HOUR) %>%
+  ggplot(aes(x = HOUR, y = n)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Shooting Incidents by Hour of the Day", x = "Hour", y = "Number of Incidents")
+```
+
+```{r}
+# Distribution by Day of the Week
+shooting_data %>%
+  count(WEEKDAY) %>%
+  ggplot(aes(x = WEEKDAY, y = n, fill = WEEKDAY)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Shooting Incidents by Day of the Week", x = "Day", y = "Number of Incidents")
+```
+
+The visualizations provide clear insights into the temporal dynamics of shooting incidents in New York City:
+
+1. **Shooting Incidents by Hour of the Day**: The graph shows a lower number of incidents in the early morning, with numbers starting to increase around noon, peaking during the late evening hours. This suggests that shootings are more frequent in the late hours, particularly between 9 PM and midnight, highlighting potential periods for increased public safety measures.
+
+2. **Shooting Incidents by Day of the Week**: The data indicates that shooting incidents are more common on weekends, with Sunday recording the highest number and a noticeable spike on Saturday. The weekdays show relatively fewer incidents, with the least occurring on Wednesday. This pattern suggests a higher risk of shootings during weekends, which could inform targeted law enforcement and community outreach efforts.
+
+### Location Analysis
+Next, we assess the distribution of shootings across different boroughs to understand geographical trends and identify potential hotspots.
+
+```{r}
+# Distribution by Borough
+shooting_data %>%
+  count(BORO) %>%
+  ggplot(aes(x = fct_reorder(BORO, n), y = n, fill = BORO)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Shooting Incidents by Borough", x = "Borough", y = "Number of Incidents")
+```
+
+The bar graph illustrates the distribution of shooting incidents across the five boroughs of New York City:
+
+1. **Brooklyn** has the highest number of incidents, making it the area with the most significant number of reported shootings.
+2. **Bronx** follows closely behind, indicating a similarly high level of shooting activity.
+3. **Queens** and **Manhattan** have fewer incidents compared to Brooklyn and the Bronx, suggesting these areas are relatively safer in terms of shooting incidents.
+4. **Staten Island** reports the fewest shootings, marking it as the borough with the lowest incident rate.
+
+This analysis identifies Brooklyn and the Bronx as potential hotspots for shooting incidents and suggests areas where law enforcement and community interventions could be most needed.
+
+### Borough and Time Interaction
+We further explore the interaction between time and location to see if certain areas are more prone to shootings at specific times.
+```{r}
+# Interaction between time and location
+shooting_data %>% 
+  group_by(BORO, HOUR) %>%
+  summarise(n = n(), .groups = 'drop') %>%
+  ggplot(aes(x = HOUR, y = n, color = BORO)) +
+  geom_line() +
+  facet_wrap(~BORO) +
+  labs(title = "Interaction between Time and Location on Shooting Incidents",
+       x = "Hour of the Day",
+       y = "Number of Incidents")
+
+```
+
+The analysis of shooting incidents in New York City reveals distinct temporal and spatial trends. The Bronx and Brooklyn experience significant increases in shootings during late evening to early morning hours, suggesting these areas are particularly risky at night. The Manhattan and Queens show a steady increase in incidents towards the evening, whereas Staten Island maintains a lower and steadier rate throughout the day. These patterns suggest that targeted policing and community interventions during peak times could be beneficial, especially in the Bronx and Brooklyn.
+
+
+## Modeling
+We develop predictive models to estimate the number of shooting incidents, using time of day and borough as predictors. This can help in allocating resources efficiently.In our initial approach, we opted for a linear regression model due to its simplicity and interpretability, aiming to understand the direct relationship between time of day, borough, and the number of shooting incidents. 
+
+```{r}
+# Prepare the data for modeling
+model_data <- shooting_data %>%
+  group_by(HOUR, BORO) %>%
+  summarise(n = n(), .groups = 'drop') %>%
+  mutate(HOUR = as.numeric(HOUR), 
+         BORO = as.factor(BORO)) %>%
+  select(HOUR, BORO, n) 
+
+# Split the data into training and testing sets
+set.seed(123)
+sample_size <- floor(0.8 * nrow(model_data))
+index <- sample(seq_len(nrow(model_data)), size = sample_size)
+train_data <- model_data[index, ]
+test_data <- model_data[-index, ]
+
+# Fit a linear model
+lm_model <- lm(n ~ HOUR + BORO, data = train_data)
+summary(lm_model)
+
+# Predict on the test data
+predictions <- predict(lm_model, test_data)
+
+# Add predictions to the test data for comparison
+test_data$predictions <- predictions
+
+# Plot the actual vs predicted values
+ggplot(test_data, aes(x = n, y = predictions)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red") +
+  labs(title = "Actual vs. Predicted Shooting Incidents",
+       x = "Actual Number of Incidents",
+       y = "Predicted Number of Incidents") +
+  theme_minimal()
+
+```
+
+Observing the limitations in capturing complex interactions and higher incident rates with the linear model, we then explored the random forest model. This approach is known for handling nonlinear relationships and intricate dependencies between variables, aiming for higher accuracy in our predictions.
+
+
+```{r}
+
+rf_model <- randomForest(n ~ HOUR + BORO, data = train_data)
+
+
+predictions_rf <- predict(rf_model, test_data)
+
+test_data$predictions_rf <- predictions_rf
+ggplot(test_data, aes(x = n, y = predictions_rf)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red") +
+  labs(title = "Actual vs Predicted Shooting Incidents (Random Forest)",
+       x = "Actual Number of Incidents",
+       y = "Predicted Number of Incidents") +
+  theme_minimal()
+
+```
+
+This transition from a linear model to a random forest was motivated by the desire to enhance the model's accuracy by capturing the more complex interactions inherent in crime data. These predictive insights assist in strategic planning and policy making, ultimately aiming to enhance urban safety and reduce gun violence.
+
+
+## Bias Identification
+In conducting this analysis, several potential biases should be considered:
+
+1. **Data Reporting Bias**: Not all shooting incidents may be reported equally across different neighborhoods.
+2. **Historical Bias**: The models are trained on historical data, which may not fully represent future trends or changes in law enforcement practices.
+3. **Geographical Bias**: The number of police patrols in different districts and the way incidents are recorded may vary.
+
+Addressing these biases is crucial for a fair and accurate analysis.
+
+
+## Conclusion and Result Analysis
+Our study aimed to uncover patterns and trends in New York City shooting incidents across different times and locations. The analysis, leveraging linear regression and random forest models, has successfully identified key temporal and spatial dynamics:
+
+1. **Temporal Patterns**: We observed distinct patterns in the timing of incidents, with higher frequencies during late evenings and specific times of the day, suggesting a time-related trend in shooting occurrences.
+
+2. **Spatial Trends**: Our analysis also highlighted significant variations across boroughs, with certain areas exhibiting higher rates of incidents, pointing to location-specific hotspots.
+
+By addressing the research question, our models have not only provided a clearer understanding of when and where shootings are more likely to occur but also offered insights that can inform targeted public safety measures and policy formulations. Despite potential biases such as data reporting and model assumptions, the findings represent a substantial step toward a deeper understanding of urban crime patterns, crucial for developing effective interventions and enhancing public safety.
